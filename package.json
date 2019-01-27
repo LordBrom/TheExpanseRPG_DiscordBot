@@ -1,0 +1,30 @@
+{
+  "name": "theexpanserpg_discordbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LordBrom/TheExpanseRPG_DiscordBot.git"
+  },
+  "keywords": [
+    "expanse",
+    "rpg",
+    "discord",
+    "bot"
+  ],
+  "author": "Nate Mills",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LordBrom/TheExpanseRPG_DiscordBot/issues"
+  },
+  "homepage": "https://github.com/LordBrom/TheExpanseRPG_DiscordBot#readme",
+  "dependencies": {
+    "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
+    "logger": "0.0.1",
+    "lokijs": "^1.5.6"
+  }
+}
