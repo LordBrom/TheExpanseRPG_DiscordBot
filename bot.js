@@ -134,8 +134,6 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 					var checkName = args[0].toLowerCase()
 					var FocusCheck = table_abilityFocus.findOne({"nameLower": checkName})
 					var abilityCheck = table_Abilities.findOne({"nameLower": checkName})
-					logger.info(table_Abilities)
-					logger.info(abilityCheck)
 					if (FocusCheck && Object.keys(FocusCheck).length) {
 						FocusCheckID = FocusCheck['$loki'];
                         abilityCheckID = FocusCheck['abilityID'];
@@ -231,7 +229,6 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 						})
 					}
 
-					logger.info(table_characterStats)
 					db.saveDatabase();
 				}
 				catch(err){
@@ -354,8 +351,6 @@ var loadAbilities = function() {
 			})
 		}
 	}
-	logger.info(table_Abilities)
-	logger.info(table_abilityFocus)
 	db.saveDatabase()
 }
 
