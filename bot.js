@@ -9,6 +9,8 @@ const serverLog     = require('logger').createLogger('./logs/log_server.log');
 const StuntList     = require('./StuntList.js');
 const AbilityList   = require('./AbilityList.js');
 
+const ExpanseRPG = require('./ExpanseRPG.js')
+
 var bot = new Discord.Client({
    token: auth.token,
    autorun: true
