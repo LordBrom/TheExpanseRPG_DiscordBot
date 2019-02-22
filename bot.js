@@ -5,18 +5,22 @@ const loki          = require('lokijs');
 const logger        = require('logger').createLogger('./logs/log_dev.log');
 const errorLog      = require('logger').createLogger('./logs/log_error.log');
 const serverLog     = require('logger').createLogger('./logs/log_server.log');
+const commandLog    = require('logger').createLogger('./logs/log_command.log');
 
 const StuntList     = require('./StuntList.js');
 const AbilityList   = require('./AbilityList.js');
 
-const ExpanseRPG = require('./ExpanseRPG.js')
+const ExpanseRPG = require('./ExpanseRPG.js');
 
-var bot = new Discord.Client({
+const bot = new Discord.Client({
    token: auth.token,
    autorun: true
 });
+// Production Database
+//var db = new loki('GameDB.json')
+// Development Database
+const db = new loki('GameDB_DEV.json')
 
-var db = new loki('GameDB.json')
 db.loadDatabase({}, function (result) {
 	// logger.info(result);
 	// put your log call here.
@@ -36,6 +40,7 @@ db.loadDatabase({}, function (result) {
 	if (!table_stunts)          { table_stunts          = db.addCollection('stunts'); loadStunts(); }
 });
 
+
 bot.on('ready', function (evt) {
 	serverLog.info('Connected');
 	serverLog.info('Logged in as: ');
@@ -53,6 +58,7 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 	// Our bot needs to know if it will execute a command
 	// It will listen for messages that will start with `!`
 	if (message.substring(0, 1) == '!') {
+		commandLog.info(channelID + " " + user + ": " + message)
 		var args = message.substring(1).split(' ');
 		var cmd = args[0];
 
@@ -67,68 +73,16 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 					});
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 
 			case 'initgame':
 				try {
-					var gameInit = {
-						"ServerID"     : serverID,
-						"GameMaster"   : "",
-						"AbilityCheck" : 0,
-						"FocusCheck"   : 0,
-						"CheckActive"  : false
-					}
-					var gameCheck = table_Games.findOne({"ServerID": serverID})
-					if (gameCheck && Object.keys(gameCheck).length) {
-						gameCheck["GameMaster"]   = ""
-						gameCheck["AbilityCheck"] = 0
-						gameCheck["FocusCheck"]   = 0
-						gameCheck["CheckActive"]  = false
-						table_Games.update(gameCheck)
-					} else {
-						table_Games.insert(gameInit)
-					}
-
-					channels = bot.servers[serverID].channels
-					channelKeys = Object.keys(channels)
-					for (var i = 0; i < channelKeys.length; i++) {
-						logger.info(channels[channelKeys[i]])
-						if (channels[channelKeys[i]].name == "character-sheets" || channels[channelKeys[i]].name == "gm-channel") {
-							bot.deleteChannel(channelKeys[i])
-						}
-					}
-
-					bot.createChannel({
-						serverID: serverID,
-						name: 'gm-channel'
-					}, function(err, rsp){
-						var gameCheck = table_Games.findOne({"ServerID": serverID})
-						if (gameCheck && Object.keys(gameCheck).length) {
-							gameCheck["GMChannel"]   = rsp.id
-							table_Games.update(gameCheck)
-						}
-						db.saveDatabase();
-					})
-
-					bot.createChannel({
-						serverID: serverID,
-						name: 'character-sheets',
-						type: "category"
-					}, function(err, rsp){
-						var gameCheck = table_Games.findOne({"ServerID": serverID})
-						if (gameCheck && Object.keys(gameCheck).length) {
-							gameCheck["sheetChannel"]   = rsp.id
-							table_Games.update(gameCheck)
-						}
-						db.saveDatabase();
-					})
-
-					db.saveDatabase();
+					initGame(serverID)
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 			case 'loadgamedata':
@@ -137,177 +91,75 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 					loadStunts();
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 
 			case 'setgm':
 				try {
-					var gameCheck = table_Games.findOne({"ServerID": serverID})
-					if (gameCheck && Object.keys(gameCheck).length) {
-						gameCheck["GameMaster"] = userID
-						table_Games.update(gameCheck)
-					} else {
-						// Game not found
-					}
-					db.saveDatabase();
+					setGameMaster(serverID, userID)
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 			case 'setcheck':
 				try {
-					if (!isGameMaster(serverID, userID)){
-						bot.sendMessage({
-							to: channelID,
-							message: "Command can only be used by the Game Master"
-						});
-						return
-					}
-					var FocusCheckID = 0;
-					var abilityCheckID = 0;
-					var checkName = args[0].toLowerCase()
-					var FocusCheck = table_abilityFocus.findOne({"nameLower": checkName})
-					var abilityCheck = table_Abilities.findOne({"nameLower": checkName})
-					if (FocusCheck && Object.keys(FocusCheck).length) {
-						FocusCheckID = FocusCheck['$loki'];
-                        abilityCheckID = FocusCheck['abilityID'];
-					} else if (abilityCheck && Object.keys(abilityCheck).length) {
-                        abilityCheckID = abilityCheck['$loki'];
-					} else {
-						// Entered avlue didn't match ability or focus
-						bot.sendMessage({
-							to: channelID,
-							message: "Could not find ability or focus matching '" + checkName + "'"
-						});
-						return
-					}
-
-					var gameCheck = table_Games.findOne({"ServerID": serverID})
-					if (gameCheck && Object.keys(gameCheck).length) {
-						gameCheck["AbilityCheck"] = abilityCheckID
-						gameCheck["FocusCheck"]   = FocusCheckID
-						gameCheck["CheckActive"]  = true
-						table_Games.update(gameCheck)
-					} else {
-						// Game not found
-					}
-					db.saveDatabase();
+					var checkName = args.join(' ').toLowerCase()
+					setCheck(serverID, channelID, userID, checkName)
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 			case 'endcheck':
 				try {
-					if (!isGameMaster(serverID, userID)){
-						bot.sendMessage({
-							to: channelID,
-							message: "Command can only be used by the Game Master"
-						});
-						return
-					}
-					var gameCheck = table_Games.findOne({"ServerID": serverID})
-					if (gameCheck && Object.keys(gameCheck).length) {
-						gameCheck["AbilityCheck"] = 0
-						gameCheck["FocusCheck"]   = 0
-						gameCheck["CheckActive"]  = false
-						table_Games.update(gameCheck)
-					} else {
-						// Game not found
-					}
-					db.saveDatabase();
+					endCheck(serverID)
 				}
 				catch(err) {
-					handleError(err)
+					handleError(err, {}, new Error().stack)
+				}
+			break;
+			case 'activecheck':
+				try {
+					console.log('test')
+					activeCheck(serverID, channelID)
+				}
+				catch(err) {
+					handleError(err, {}, new Error().stack)
+				}
+			break;
+
+			case 'roll':
+			case 'check':
+			case 'simple':
+				try {
+					simpleCheck(serverID, channelID, userID)
+				}
+				catch(err) {
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 
 			case 'addcharacter':
 				try {
 					var gameID = 0;
-					var characterName = args[0]
+					var characterName = args.join(' ').toLowerCase()
 					if (characterName.length == 0){
 						return;
 					}
 
-					var gameCheck = table_Games.findOne({"ServerID": serverID})
-					if (gameCheck && Object.keys(gameCheck).length) {
-						gameID = gameCheck['$loki']
-					} else {
-						// Game not found
-						return;
-					}
-					var sheetChannel = gameCheck['sheetChannel']
-
-					var baseCharacter = {
-						"GameID" : gameID,
-						"UserID" : userID,
-						"name"   : characterName
-					}
-					var characterCheck = table_character.findOne({"UserID" : userID})
-					if (characterCheck && Object.keys(characterCheck).length) {
-						var characterAbilityCheck = table_characterStats.find({"CharacterID" : characterCheck['$loki']})
-						table_character.remove(characterCheck['$loki'])
-						for (var i = 0; i < characterAbilityCheck.length; i++) {
-							table_characterStats.remove(characterAbilityCheck[i]['$loki'])
-						}
-					}
-
-					var newCharacter = table_character.insert(baseCharacter)
-					var abilities = table_Abilities.find({})
-
-					for (var i = 0; i < abilities.length; i++) {
-						table_characterStats.insert({
-							"CharacterID" : newCharacter['$loki'],
-							"AbilityID"   : abilities[i]['$loki'],
-							"score"       : 0
-						})
-					}
-
-					bot.editNickname({
-						"serverID" : serverID,
-						"userID"   : userID,
-						"nick"     : characterName
-					}, handleError)
-					bot.createChannel({
-						"serverID"  : serverID,
-						"name"      : characterName,
-						"parentID"  : sheetChannel
-					}, function(err, rsp){
-						newCharacter["channelID"] = rsp.id
-						table_character.update(newCharacter)
-						db.saveDatabase();
-						pinCharacterStats(userID)
-					})
-
-					db.saveDatabase();
+					addCharacter(serverID, userID, characterName);
 				}
 				catch(err){
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 			case 'mystats':
 				try {
-					var characterCheck = table_character.findOne({"UserID" : userID})
-					if (!characterCheck || !Object.keys(characterCheck).length) {
-						//character not found
-						console.log("character not found")
-						return;
-					}
-					var stats = getCharacterStats(userID)
-					var outputStr = ""
-					outputStr += "**" + characterCheck['name'] + "**'s stats\n"
-					for (var i = 0; i < stats.length; i++) {
-						outputStr += stats[i]['name'] + ": " + stats[i]['score'] + "\n"
-					}
-					bot.sendMessage({
-						to: channelID,
-						message: outputStr
-					});
+					myStats(serverID, channelID, userID)
 				}
 				catch(err){
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
 			case 'setstat':
@@ -316,39 +168,65 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 					var statValue = Number.parseInt(args[1])
 					if (!Number.isInteger(statValue)) {
 						//Value not an integer
-						console.log("Value not an integer")
+						throw("Value not an integer")
 						return;
 					}
-
-					var characterCheck = table_character.findOne({"UserID" : userID})
-					if (!characterCheck || !Object.keys(characterCheck).length) {
-						//character not found
-						console.log("character not found")
-						return;
-					}
-					var characterID = characterCheck['$loki']
-
-					var abilityCheck = table_Abilities.findOne({'$or':[{"nameLower":statName},{"shortName":statName}]})
-					if (!abilityCheck || !Object.keys(abilityCheck).length) {
-						//ability not found
-						console.log("ability not found")
-						return;
-					}
-					var abilityID = abilityCheck['$loki']
-
-					var statCheck = table_characterStats.findOne({"CharacterID" : characterID, "AbilityID" : abilityID})
-					if (statCheck && Object.keys(statCheck).length) {
-						statCheck['score'] = statValue
-						table_characterStats.update(statCheck)
-					}
-
-					pinCharacterStats(userID)
-					db.saveDatabase()
+					setStat(serverID, userID, statName, statValue)
 				}
 				catch(err){
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 			break;
+			case 'addfocus':
+				try {
+					var focusName = args.join(' ').toLowerCase()
+					// addFocus(userID, focusName)
+				}
+				catch(err){
+					handleError(err, {}, new Error().stack)
+				}
+			break;
+			case 'removefocus':
+				try {
+					var focusName = args.join(' ').toLowerCase()
+					// removeFocus(userID, focusName)
+				}
+				catch(err){
+					handleError(err, {}, new Error().stack)
+				}
+			break;
+
+
+
+			case 'help':
+				try {
+					var outputStr = "";
+					outputStr += "ping"          + ":  " + "\n";
+					outputStr += "initgame"      + ":  " + "\n";
+					outputStr += "loadgamedata"  + ":  " + "\n";
+					outputStr += "setgm"         + ":  " + "\n";
+					outputStr += "setcheck*"     + ":  " + "\n";
+					outputStr += "endcheck*"     + ":  " + "\n";
+					outputStr += "activecheck"   + ":  " + "\n";
+					outputStr += "roll"          + ":  " + "\n";
+					outputStr += "addcharacter"  + ":  " + "\n";
+					outputStr += "mystats"       + ":  " + "\n";
+					outputStr += "setstat"       + ":  " + "\n";
+					outputStr += "addfocus"      + ":  " + "\n";
+					outputStr += "removefocus"   + ":  " + "\n";
+					outputStr += "help"          + ":  " + "\n";
+					outputStr += "*GM command";
+
+					bot.sendMessage({
+						to: channelID,
+						message: outputStr
+					});
+				}
+				catch(err){
+					handleError(err, {}, new Error().stack)
+				}
+			break;
+
 
 			default:
 				try {
@@ -356,16 +234,22 @@ bot.on('message', function (user, userID, channelID, message, evt) {
 					logger.info("'" + message + "'" )
 				}
 				catch(err){
-					handleError(err)
+					handleError(err, {}, new Error().stack)
 				}
 				bot.sendMessage({
 					to: channelID,
-					message: "I don't know that one"
+					message: "I don't know that one. try !help"
 				});
 			break;
 		}
 	}
 });
+
+var handleError = function(err, rsp, callstack) {
+	errorLog.error("======================")
+	errorLog.error(err, rsp, callstack)
+	errorLog.error("======================")
+}
 
 var loadStunts = function() {
 	table_stunts.clear();
@@ -405,21 +289,11 @@ var loadAbilities = function() {
 	db.saveDatabase()
 }
 
-var isGameMaster = function(serverID, userID) {
-	var gameCheck = table_Games.findOne({"ServerID": serverID})
-	if (gameCheck && Object.keys(gameCheck).length) {
-		return gameCheck["GameMaster"] == userID
-	} else {
-		// Game not found
-	}
-	return false;
-}
-
-var getCharacterStats = function(userID) {
-	var characterCheck = table_character.findOne({"UserID" : userID})
+var getCharacterStats = function(i_serverID, i_userID) {
+	var characterCheck = table_character.findOne({ "ServerID" : i_serverID, "UserID" : i_userID})
 	if (!characterCheck || !Object.keys(characterCheck).length) {
 		//character not found
-		console.log("character not found")
+		throw("character not found")
 		return [];
 	}
 	var characterID = characterCheck['$loki']
@@ -434,14 +308,14 @@ var getCharacterStats = function(userID) {
 	return results;
 }
 
-var pinCharacterStats = function(userID) {
-	var characterCheck = table_character.findOne({"UserID" : userID})
+var pinCharacterStats = function(i_serverID, i_userID) {
+	var characterCheck = table_character.findOne({ "ServerID" : i_serverID, "UserID" : i_userID})
 	if (!characterCheck || !Object.keys(characterCheck).length) {
 		//character not found
-		console.log("character not found")
+		throw("character not found")
 		return [];
 	}
-	var stats = getCharacterStats(userID)
+	var stats = getCharacterStats(i_serverID, i_userID)
 	var characterChannel = characterCheck["channelID"]
 	var characterPinnedStats = characterCheck["pinnedStats"]
 	var outputStr = ""
@@ -459,17 +333,581 @@ var pinCharacterStats = function(userID) {
 		to: characterChannel,
 		message: outputStr
 	}, function(err, rsp){
-		characterCheck["pinnedStats"] = rsp.id;
-		bot.pinMessage({
-			channelID: characterChannel,
-			messageID: rsp.id
-		})
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				characterCheck["pinnedStats"] = rsp.id;
+				bot.pinMessage({
+					channelID: characterChannel,
+					messageID: rsp.id
+				})
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
 	});
-
 }
 
-var handleError = function(err, rsp) {
-	errorLog.error("======================")
-	errorLog.error(err, rsp)
-	errorLog.error("======================")
+var outputStunts = function(i_channelID, find, sort, incDesc = false) {
+	var stunts = getStunts(find, sort)
+	var outputStr = "";
+	var currentStuntType = "";
+	for (var i = 0; i < stunts.length; i++)
+	{
+		if (stunts[i].type != currentStuntType)
+		{
+			if (currentStuntType != "")
+			{
+				bot.sendMessage({
+					to: i_channelID,
+					message: outputStr
+				});
+				outputStr = ""
+			}
+			outputStr += " **" + stunts[i].type + "**\n"
+			currentStuntType = stunts[i].type
+		}
+		var costRange = stunts[i].min
+		if (stunts[i].min != stunts[i].max) {
+			if (stunts[i].max == 6) {
+				costRange += "+"
+			} else {
+				costRange += " - " + stunts[i].max
+			}
+		}
+		outputStr += "(" + costRange + ") " + stunts[i].name
+		if (incDesc)
+		{
+		   outputStr +=  ": " + "*" + stunts[i].desc + "*"
+		}
+	   outputStr += "\n"
+	}
+	bot.sendMessage({
+		to: i_channelID,
+		message: outputStr
+	});
+}
+
+var isString = function(str) {
+	if (typeof str === 'string' || str instanceof String) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////// Expanse RPG functions //////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var getGame = function(i_serverID) {
+	var gameCheck = table_Games.findOne({"ServerID": i_serverID})
+	if (gameCheck && Object.keys(gameCheck).length) {
+		return gameCheck;
+	} else {
+		throw("Game not found")
+	}
+	return {}
+}
+
+var getCharacter = function(i_serverID, i_userID) {
+	var characterCheck = table_character.findOne({ "ServerID" : i_serverID, "UserID" : i_userID})
+	if (characterCheck && Object.keys(characterCheck).length) {
+		return characterCheck;
+	} else {
+		throw("Character not found")
+	}
+	return {}
+}
+
+var getAbilityByID = function(i_abilityID) {
+	var abilityCheck = table_Abilities.findOne({'$loki' : i_abilityID })
+	if (abilityCheck && Object.keys(abilityCheck).length) {
+		return abilityCheck;
+	} else {
+		throw("Ability not found")
+	}
+	return {}
+}
+
+var getAbilityByName = function(i_abilityName) {
+	var abilityCheck = table_Abilities.findOne({'$or':[{"nameLower":i_abilityName},{"shortName":i_abilityName}]})
+	if (abilityCheck && Object.keys(abilityCheck).length) {
+		return abilityCheck;
+	} else {
+		throw("Ability not found")
+	}
+	return {}
+}
+
+var getFocusByID = function(i_focusID) {
+	var focusCheck = table_abilityFocus.findOne({'id' : i_focusID })
+	if (focusCheck && Object.keys(focusCheck).length) {
+		return focusCheck;
+	} else {
+		throw("focus not found")
+	}
+	return {}
+}
+
+var getStunts = function(find, sort) {
+	if (!find || typeof find !== 'object'){find = {}}
+	if (!sort || !isString(sort)){sort = ""}
+
+	var stunts = table_stunts.chain().find(find).simplesort(["type", "max"]).data();
+
+	return stunts
+}
+
+var getFocusByName = function(i_focusName) {
+	var focusCheck = table_abilityFocus.findOne({'$or':[{"nameLower":i_focusName},{"shortName":i_focusName}]})
+	if (focusCheck && Object.keys(focusCheck).length) {
+		return focusCheck;
+	} else {
+		throw("focus not found")
+	}
+	return {}
+}
+
+var initGame = function(i_serverID) {
+	var initGameObj = {
+		"ServerID"     : i_serverID,
+		"GameMaster"   : "",
+		"AbilityCheck" : 0,
+		"FocusCheck"   : 0,
+		"CheckActive"  : false,
+		"GMChannel"    : 0,
+		"SheetChannel" : 0,
+		"GMRoleID" 	   : 0,
+		"PlayerRoleID" : 0
+	}
+	var gameObj = table_Games.findOne({"ServerID": i_serverID})
+
+	if (gameObj && Object.keys(gameObj).length) {
+		gameObj["GameMaster"]    = ""
+		gameObj["AbilityCheck"]  = 0
+		gameObj["FocusCheck"]    = 0
+		gameObj["CheckActive"]   = false
+		gameObj["GMChannel"]     = 0
+		gameObj["SheetChannel"]  = 0
+		gameObj["GMRoleID"]      = 0
+		gameObj["PlayerRoleID"]  = 0
+	} else {
+		var gameObj = table_Games.insert(initGameObj)
+	}
+
+	channels = bot.servers[i_serverID].channels
+	channelKeys = Object.keys(channels)
+	for (var i = 0; i < channelKeys.length; i++) {
+		if (channels[channelKeys[i]].name == "character-sheets") {
+			gameObj["SheetChannel"] = channelKeys[i];
+		}
+		else if ( channels[channelKeys[i]].name == "gm-channel") {
+			gameObj["GMChannel"] = channelKeys[i];
+		}
+	}
+
+	var everyoneRoleID = 0;
+
+	// can change to for (role in roles); //or something...
+	roles = bot.servers[i_serverID].roles
+	channelKeys = Object.keys(roles)
+	for (var i = 0; i < channelKeys.length; i++) {
+		if (roles[channelKeys[i]].name.toLowerCase() == "player") {
+			gameObj["PlayerRoleID"] = channelKeys[i];
+		}
+		else if ( roles[channelKeys[i]].name.toLowerCase() == "gamemaster") {
+			gameObj["GMRoleID"] = channelKeys[i];
+		}
+		else if ( roles[channelKeys[i]].name == "@everyone") {
+			everyoneRoleID = channelKeys[i];
+		}
+	}
+
+	// Create GameMaster Role
+	if (gameObj["GMRoleID"] == 0) {
+		makeGameMasterRole(gameObj, i_serverID, everyoneRoleID);
+	} else if (gameObj["GMChannel"] == 0) {
+		makeGameMasterChannel(gameObj, i_serverID, gameObj["GMRoleID"], everyoneRoleID);
+	} else {
+		setGameMasterChannelPermissions(gameObj["GMChannel"], gameObj["GMRoleID"], everyoneRoleID);
+	}
+
+	// Create Player Role
+	if (gameObj["PlayerRoleID"] == 0) {
+		makePlayerRole(gameObj, i_serverID);
+	}
+
+	// Create characterSheet channel category
+	if (gameObj["SheetChannel"] == 0) {
+		makeCharacterSheetChannelCategory(gameObj, i_serverID);
+	}
+
+	gameObj = table_Games.update(gameObj)
+	db.saveDatabase();
+}
+
+var makeCharacterSheetChannelCategory = function(i_gameObj, i_serverID) {
+	var SheetChannelID = 0;
+	bot.createChannel({
+		"serverID": i_serverID,
+		"name": 'character-sheets',
+		"type": "category"
+	}, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				SheetChannelID = rsp.id
+				table_Games.update(i_gameObj)
+				db.saveDatabase();
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var makePlayerRole = function(i_gameObj, i_serverID) {
+	var PlayerRoleID = 0;
+	bot.createRole(i_serverID, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				PlayerRoleID = rsp.id
+				bot.editRole({
+					"serverID": i_serverID,
+					"roleID": PlayerRoleID,
+					"name" : "Player",
+					"mentionable" : true,
+					"hoist" : false,
+					"color" : "#6baaec"
+				}, function(err, rsp){
+					if (err) {
+						handleError(err, {}, new Error().stack)
+					}
+				})
+				table_Games.update(i_gameObj)
+				db.saveDatabase();
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var makeGameMasterRole = function(i_gameObj, i_serverID, i_everyoneRoleID) {
+	var GMRoleID = 0;
+	bot.createRole(i_serverID, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				GMRoleID = rsp.id
+
+				setGameMasterRolePermissions(i_serverID, GMRoleID);
+
+				if (i_gameObj["GMChannel"] == 0) {
+					makeGameMasterChannel(i_gameObj, i_serverID, GMRoleID, i_everyoneRoleID)
+				} else {
+					setGameMasterChannelPermissions(i_gameObj["GMChannel"], GMRoleID, i_everyoneRoleID)
+				}
+				table_Games.update(i_gameObj)
+				db.saveDatabase();
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var setGameMasterRolePermissions = function(i_serverID, i_GMRoleID) {
+	bot.editRole({
+		"serverID": i_serverID,
+		"roleID": i_GMRoleID,
+		"name" : "GameMaster",
+		"mentionable" : true,
+		"hoist" : true,
+		"color" : "#df4a4a"
+	}, function(err, rsp){
+		if (err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var makeGameMasterChannel = function(i_gameObj, i_serverID, i_GMRoleID, i_everyoneRoleID) {
+	var GMChannel = 0;
+	bot.createChannel({
+		"serverID": i_serverID,
+		"name": 'gm-channel'
+	}, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				GMChannel = rsp.id
+				setGameMasterChannelPermissions(GMChannel, i_GMRoleID, i_everyoneRoleID)
+				table_Games.update(i_gameObj)
+				db.saveDatabase();
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var setGameMasterChannelPermissions = function(i_GMChannel, i_RoleID, i_everyoneRoleID) {
+	bot.editChannelPermissions({
+		"channelID" : i_GMChannel,
+		"roleID" : i_RoleID,
+		"deny" : [],
+		"allow" : [10]
+	}, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				bot.editChannelPermissions({
+					"channelID" : i_GMChannel,
+					"roleID" : i_everyoneRoleID,
+					"deny" : [10],
+					"allow" : []
+				})
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+}
+
+var setGameMaster = function(i_serverID, i_userID) {
+	var gameObj = getGame(i_serverID)
+	gameObj["GameMaster"] = i_userID
+	table_Games.update(gameObj)
+	db.saveDatabase();
+}
+
+var isGameMaster = function(i_serverID, i_userID) {
+	var gameObj = getGame(i_serverID)
+	return gameObj["GameMaster"] == i_userID;
+}
+
+var simpleCheck = function(i_serverID, i_channelID, i_userID) {
+	var statBonus  = 0;
+	var focusBonus = 0;
+	var stunts     = false;
+	var focusStr   = ""
+	var statStr    = ""
+
+	var dramaDie = Math.floor(Math.random() * (6 - 1) + 1)
+	var die1     = Math.floor(Math.random() * (6 - 1) + 1)
+	var die2     = Math.floor(Math.random() * (6 - 1) + 1)
+
+	if (dramaDie == die1 || dramaDie == die2 || die1 == die2) {
+		stunts = true;
+	}
+
+	var gameObj = getGame(i_serverID)
+	if (gameObj["CheckActive"]) {
+		var characterStats = getCharacterStats(i_serverID, i_userID)
+		if (gameObj["FocusCheck"]) {
+			var characterFocusObj = table_characterFocus.findOne({"ServerID" : i_serverID, "UserID": i_userID, "FocusID": gameObj["FocusCheck"]})
+			if (characterFocusObj["score"] && Object.keys(characterFocusObj["score"]).length)
+			{
+				var focusObj = getFocusByID(gameObj["FocusCheck"])
+				focusBonus = 2;
+				focusStr = focusObj["name"] + ": " + focusBonus + "\n"
+			}
+		}
+		if (gameObj["AbilityCheck"]) {
+			var characterStatObj = table_characterStats.findOne({"ServerID" : i_serverID, "UserID": i_userID, "AbilityID": gameObj["AbilityCheck"]})
+			var abilityObj = getAbilityByID(gameObj["AbilityCheck"])
+			statBonus = characterStatObj["score"];
+			statStr = abilityObj["name"] + ": " + statBonus + "\n"
+		}
+	}
+
+	var total = dramaDie + die1 + die2 + statBonus + focusBonus
+
+	var outputStr = ""
+	outputStr += statStr
+	outputStr += focusStr
+	outputStr += "Die 1: " + die1 + "\n"
+	outputStr += "Die 2: " + die2 + "\n"
+	outputStr += "Drama Die: " + dramaDie + "\n"
+	outputStr += "Total: " + total
+	if (stunts) {
+		outputStr += " (" + dramaDie + " Stunt Points)"
+	}
+
+	bot.sendMessage({
+		to: i_channelID,
+		message: outputStr
+	});
+
+	if (stunts){
+		setTimeout(function() {
+			outputStunts(i_channelID, {"min": { '$lte' : dramaDie }}, "type,min")
+		}, 1000);
+	}
+}
+
+var setCheck = function(i_serverID, i_channelID, i_userID, i_checkName) {
+	if (!isGameMaster(i_serverID, i_userID)){
+		bot.sendMessage({
+			to: i_channelID,
+			message: "Command can only be used by the Game Master"
+		});
+		return
+	}
+
+	var focusCheckID   = 0;
+	var abilityCheckID = 0;
+	var FocusCheck     = table_abilityFocus.findOne({'$or':[{"nameLower":i_checkName},{"shortName":i_checkName}]})
+	var abilityCheck   = table_Abilities.findOne(   {'$or':[{"nameLower":i_checkName},{"shortName":i_checkName}]})
+
+	if (FocusCheck && Object.keys(FocusCheck).length) {
+		focusCheckID   = FocusCheck['$loki'];
+        abilityCheckID = FocusCheck['abilityID'];
+	} else if (abilityCheck && Object.keys(abilityCheck).length) {
+        abilityCheckID = abilityCheck['$loki'];
+	} else {
+		// Entered value didn't match ability or focus
+		bot.sendMessage({
+			to: i_channelID,
+			message: "Could not find ability or focus matching '" + i_checkName + "'"
+		});
+		return
+	}
+
+	var gameObj = getGame(i_serverID)
+	gameObj["AbilityCheck"] = abilityCheckID
+	gameObj["FocusCheck"]   = focusCheckID
+	gameObj["CheckActive"]  = true
+	table_Games.update(gameObj)
+	db.saveDatabase();
+}
+
+var endCheck = function(i_serverID, i_channelID, i_userID) {
+	if (!isGameMaster(i_serverID, i_userID)){
+		bot.sendMessage({
+			to: i_channelID,
+			message: "Command can only be used by the Game Master"
+		});
+		return
+	}
+
+	var gameObj = getGame(i_serverID)
+	gameObj["AbilityCheck"] = 0
+	gameObj["FocusCheck"]   = 0
+	gameObj["CheckActive"]  = false
+	table_Games.update(gameObj)
+	db.saveDatabase();
+}
+
+var activeCheck = function(i_serverID, i_channelID) {
+	var gameObj = getGame(i_serverID);
+	bot.sendMessage({
+		to: i_channelID,
+		message: "Check Active: " + gameObj["CheckActive"]  + "\n" +
+				 "FocusID: "      + gameObj["FocusCheck"]   + "\n" +
+				 "AbilityID: "    + gameObj["AbilityCheck"] + "\n"
+	});
+}
+
+var addCharacter = function(i_serverID, i_userID, i_characterName) {
+	var gameObj = getGame(i_serverID)
+	var gameID = gameObj['$loki']
+	var sheetChannel = gameObj['SheetChannel']
+
+	var baseCharacter = {
+		"ServerID" : i_serverID,
+		"GameID"   : gameID,
+		"UserID"   : i_userID,
+		"name"     : i_characterName
+	}
+	var characterCheck = table_character.findOne({"ServerID" : i_serverID, "UserID" : i_userID})
+	if (characterCheck && Object.keys(characterCheck).length) {
+		var characterAbilityCheck = table_characterStats.find({"ServerID" : i_serverID, "CharacterID" : characterCheck['$loki']})
+		table_character.remove(characterCheck['$loki'])
+		for (var i = 0; i < characterAbilityCheck.length; i++) {
+			table_characterStats.remove(characterAbilityCheck[i]['$loki'])
+		}
+	}
+
+	var newCharacter = table_character.insert(baseCharacter)
+	var abilities = table_Abilities.find({})
+
+	for (var i = 0; i < abilities.length; i++) {
+		table_characterStats.insert({
+			"ServerID"	  : i_serverID,
+			"UserID"      : i_userID,
+			"CharacterID" : newCharacter['$loki'],
+			"AbilityID"   : abilities[i]['$loki'],
+			"score"       : 0
+		})
+	}
+
+	// bot.editNickname({
+	// 	"serverID" : i_serverID,
+	// 	"userID"   : i_userID,
+	// 	"nick"     : i_characterName
+	// }, handleError)
+
+	bot.createChannel({
+		"serverID"  : i_serverID,
+		"name"      : i_characterName,
+		"parentID"  : sheetChannel
+	}, function(err, rsp){
+		try {
+			if (err) {
+				handleError(err, {}, new Error().stack)
+			} else {
+				newCharacter["channelID"] = rsp.id
+				table_character.update(newCharacter)
+				db.saveDatabase();
+				pinCharacterStats(i_serverID, i_userID)
+			}
+		} catch(err) {
+			handleError(err, {}, new Error().stack)
+		}
+	})
+
+	db.saveDatabase();
+}
+
+var myStats = function(i_serverID, i_channelID, i_userID) {
+	var characterObj = getCharacter(i_serverID, i_userID)
+	var stats = getCharacterStats(i_serverID, i_userID)
+
+	var outputStr = ""
+	outputStr += "**" + characterObj['name'] + "**'s stats\n"
+	for (var i = 0; i < stats.length; i++) {
+		outputStr += stats[i]['name'] + ": " + stats[i]['score'] + "\n"
+	}
+
+	bot.sendMessage({
+		to: i_channelID,
+		message: outputStr
+	});
+}
+
+var setStat = function(i_serverID, i_userID, i_abilityName, i_abilityValue) {
+	var characterObj = getCharacter(i_serverID, i_userID)
+	var characterID = characterObj['$loki']
+
+	var abilityObj = getAbilityByName(i_abilityName)
+	var abilityID = abilityObj['$loki']
+
+	var statCheck = table_characterStats.findOne({"ServerID" : i_serverID, "CharacterID" : characterID, "AbilityID" : abilityID})
+	if (statCheck && Object.keys(statCheck).length) {
+		statCheck['score'] = i_abilityValue
+		table_characterStats.update(statCheck)
+	}
+
+	pinCharacterStats(i_serverID, i_userID)
+	db.saveDatabase()
 }
